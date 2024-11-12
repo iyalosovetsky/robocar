@@ -1,0 +1,6 @@
+{
+    "files.associations": {
+        "sdkconfig.h": "c",
+        "uni_platform_unijoysticle.h": "c"
+    }
+}

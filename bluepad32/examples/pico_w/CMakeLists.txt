@@ -29,6 +29,7 @@ pico_sdk_init()
 add_executable(bluepad32_picow_example_app
     src/main.c
     src/my_platform.c
+    src/my_motors.c
 )
 
 target_include_directories(bluepad32_picow_example_app PRIVATE

@@ -1,5 +1,6 @@
 // Example file - Public Domain
 // Need help? http://bit.ly/bluepad32-help
+//https://github.com/raspberrypi/pico-examples/blob/master/gpio/hello_gpio_irq/hello_gpio_irq.c
 
 #include <btstack_run_loop.h>
 #include <pico/cyw43_arch.h>
@@ -8,6 +9,7 @@
 
 #include "hardware/pwm.h"
 #include "hardware/clocks.h"
+#include "hardware/gpio.h"
 
 #include <uni.h>
 
@@ -20,8 +22,29 @@
 #endif
 
 
-#define WRAPVAL 5000
-#define CLKDIV 5.0f
+void gpio_callback(uint gpio, uint32_t events) {
+    if (gpio==LEFT_MOTOR_FORWARD_PIN_OPTICAL) {
+        inc_motors_optical_counter0(MOTOR_FW_L) ; 
+    } else if  (gpio==RIGHT_MOTOR_FORWARD_PIN_OPTICAL) {
+        inc_motors_optical_counter0(MOTOR_FW_R) ; 
+    } else if (gpio==LEFT_MOTOR_BACKWARD_PIN_OPTICAL) {
+        inc_motors_optical_counter0(MOTOR_BW_L) ; 
+    } else if  (gpio==RIGHT_MOTOR_BACKWARD_PIN_OPTICAL) {
+        inc_motors_optical_counter0(MOTOR_BW_R) ; 
+    }
+    // Put the GPIO event(s) that just happened into event_str
+    // so we can print it
+    // gpio_event_string(event_str, events);
+    // printf("GPIO %d %s\n", gpio, event_str);
+}
+
+bool repeating_timer_callback(__unused struct repeating_timer *t) {
+    
+    ticks(PID_SPEED);
+    
+   
+    return true;
+}
 
 // static const char * controller_addr_string1 = "35:20:3B:54:1A:90"; //dualshock4 #1
 // static const char * controller_addr_string2 = "0A:62:AD:23:CC:43"; //dualshock4 #2
@@ -31,79 +54,24 @@
 // Defined in my_platform.c
 struct uni_platform* get_my_platform(void);
 
-void init_pwm_n(uint gpio1,uint gpio2) {
-    // Find out which PWM slice is connected to GPIO 16-19 (Slice 0) and GPIO2 (Slice 1)
-    uint slice_num = pwm_gpio_to_slice_num(gpio1);  //0A ->0
-    // Mask our slice's IRQ output into the PWM block's single interrupt line,
-    // and register our interrupt handler    
-    pwm_clear_irq(slice_num);
-    pwm_set_irq_enabled(slice_num, false);
-    // irq_set_exclusive_handler(PWM_IRQ_WRAP, on_pwm_wrap);
-    // irq_set_enabled(PWM_IRQ_WRAP, true);
-    // motor1 left as PWM
-// PWM 0 Forward PWM, fast decay
-// 1 PWM Forward PWM, slow decay
-// 0 PWM Reverse PWM, fast decay
-// PWM 1 Reverse PWM, slow decay    
-    gpio_set_function(gpio1, GPIO_FUNC_PWM); //0A
-    // gpio_set_function(gpio2, GPIO_FUNC_PWM); //0A
-    // gpio_set_function(gpio2, GPIO_FUNC_PWM); //0B
-    gpio_init(gpio2);
-    gpio_set_dir(gpio2, GPIO_OUT);
-    gpio_put(gpio2, 0);   
 
-    // This section configures the period of the PWM signals
-    // pwm_config_set_clkdiv_mode(slice_num, PWM_DIV_FREE_RUNNING);
-    pwm_set_clkdiv_mode(slice_num, PWM_DIV_FREE_RUNNING); //Free-running counting at rate dictated by fractional divider
-    pwm_set_wrap(slice_num, WRAPVAL) ;
-    pwm_set_clkdiv(slice_num, CLKDIV) ;
-    // +
-    pwm_set_phase_correct(slice_num, false);
-    // +
-    pwm_set_output_polarity(slice_num, false, false);
-    // pwm_set_output_polarity(slice_num, true, true);
-    // This sets duty cycle
-    // pwm_set_chan_level(slice_num, PWM_CHAN_A, 1000);  
-    pwm_set_both_levels(slice_num, WRAPVAL/2, 0);
-    //+
-    pwm_set_enabled(slice_num, false);
-     
-     // Start the channel
-    // pwm_set_mask_enabled((1u << slice_num));  
-    
-    // // Set Free running, No phase correct, int 1, frac 4 and channel B inverted for Slice 0
-    // pwm_set_clkdiv_mode(slice_num, PWM_DIV_FREE_RUNNING); //Free-running counting at rate dictated by fractional divider
-    // pwm_set_phase_correct(slice_num, false);
-    // pwm_set_clkdiv_int_frac(slice_num, 1, 4);
-    // pwm_set_output_polarity(slice_num, false, true);
-    // Set the TOP register to 5000, which with the system frequency at 125MHz, corresponds 
-    // to a frequency of 20KHz for PWM of Slice 0
-    // pwm_set_wrap(slice_num, 5000);
-    // pwm_set_both_levels(slice_num, 2500, 2500);
-    // Enable PWM running
-    // pwm_set_enabled(slice_num, true);
-
-}
 
 int main() {
     stdio_init_all();
     //pwm
 
- // motor1
-    gpio_init(MOTOR1_STBY);
-    gpio_set_dir(MOTOR1_STBY, GPIO_OUT);
-    gpio_put(MOTOR1_STBY, 0); //to sleep
-
-    gpio_init(MOTOR2_STBY);
-    gpio_set_dir(MOTOR2_STBY, GPIO_OUT);
-    gpio_put(MOTOR2_STBY, 0); //to sleep
+ 
+    for (int wheel = 0; wheel < MOTORS_CNT; ++wheel) {
+      motor_init ( wheel );
+    }
     
-    init_pwm_n(LEFT_MOTOR1_PIN_1 ,LEFT_MOTOR1_PIN_2);
-    init_pwm_n(RIGHT_MOTOR1_PIN_1,RIGHT_MOTOR1_PIN_2);
-    init_pwm_n(LEFT_MOTOR2_PIN_1 ,LEFT_MOTOR2_PIN_2);
-    init_pwm_n(RIGHT_MOTOR2_PIN_1,RIGHT_MOTOR2_PIN_2);
 
-
+    gpio_set_irq_enabled_with_callback(LEFT_MOTOR_FORWARD_PIN_OPTICAL, GPIO_IRQ_EDGE_RISE , true, &gpio_callback);
+    gpio_set_irq_enabled_with_callback(RIGHT_MOTOR_FORWARD_PIN_OPTICAL, GPIO_IRQ_EDGE_RISE , true, &gpio_callback);
+    gpio_set_irq_enabled_with_callback(LEFT_MOTOR_BACKWARD_PIN_OPTICAL, GPIO_IRQ_EDGE_RISE , true, &gpio_callback);
+    gpio_set_irq_enabled_with_callback(RIGHT_MOTOR_BACKWARD_PIN_OPTICAL, GPIO_IRQ_EDGE_RISE , true, &gpio_callback);
+    
+    
    
 
 //     // Print over serial the system clock frequency
@@ -135,7 +103,7 @@ int main() {
 
     // Initialize BP32
     uni_init(0, NULL);
-uni_bt_allowlist_set_enabled(false);
+    uni_bt_allowlist_set_enabled(false);
     // //----------------
     // bd_addr_t controller_addr1;
     // sscanf_bd_addr(controller_addr_string1, controller_addr1);
@@ -158,7 +126,12 @@ uni_bt_allowlist_set_enabled(false);
 
     ////    ---------- from arduino demo code    
 
-
+    // Create a repeating timer that calls repeating_timer_callback.
+    // If the delay is > 0 then this is the delay between the previous callback ending and the next starting.
+    // If the delay is negative (see below) then the next call to the callback will be exactly 500ms after the
+    // start of the call to the last callback
+    struct repeating_timer timer;
+    add_repeating_timer_ms(TICK_PID_TIMER, repeating_timer_callback, NULL, &timer);
 
     // Does not return.
     btstack_run_loop_execute();

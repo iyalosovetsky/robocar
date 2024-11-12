@@ -5,6 +5,7 @@
 // https://github.com/Freitolini/butterfly
 // https://github.com/bvpav/TNR-12
 //https://github.com/susesKaninchen/Sumobot2024/tree/main
+// https://medium.com/@mike_polo/parsing-crsf-protocol-from-a-flight-controller-with-a-raspberry-pi-for-telemetry-data-79e9426ff943
 #include <stdio.h>
 #include "pico/stdlib.h"
 #include "hardware/gpio.h"
@@ -23,10 +24,10 @@
 #include "sdkconfig.h"
 #include "hardware/uart.h"
 #include "hardware/irq.h"
-#include "hardware/timer.h"
+
 #include "hardware/pwm.h"
 #include "pico/stdlib.h"
-
+#include "my_joystick.h"
 #include "my_motors.h"
 
 
@@ -40,38 +41,15 @@
 
 // Joystick Analog dead zone
 
-#define DEAD_ZONE_XY 8 
-#define ZONE1_XY 70 
-#define ZONE2_XY 130
-#define ZONE3_XY 300
-#define ZONE4_XY 470
-#define MAX_ZONE_XY 512
-#define MIN_ZONE_XY 0
-#define DEAD_ZONE_ACCEL 150
-#define DEAD_ZONE_GYRO 500
 
 
-#define UART_ID uart0
-#define BAUD_RATE 115200
+
 
 // We are using pins 0 and 1, but see the GPIO function select table in the
 // datasheet for information on which other pins can be used.
-#define UART_TX_PIN 0
-#define UART_RX_PIN 1
-#define PARITY    UART_PARITY_NONE
-#define DATA_BITS 8
-#define STOP_BITS 1
 
 
-#define PROT_SOF 0x01
-#define PROT_EOF 0x02
-#define UART_BUFF_SIZE 0x08
-#define PROT_BUFF_SIZE 0x04
 
-#define FOR_LEFT 0
-#define FOR_RIGHT 1
-#define BACK_LEFT 2
-#define BACK_RIGHT 3
 
 #define CHANGE_DPAD 1
 #define CHANGE_BUTTONS 2
@@ -85,10 +63,7 @@
 #define CHANGE_GYRO 512
 #define CHANGE_ACCEL 1024
 
-// a PWM frequency of 5 kHz. (125M/5/5000=5kHz)
-#define WRAPVAL 5000
-#define MAX_VAL WRAPVAL-100
-#define CLKDIV 5.0f
+
 
 static int chars_rxed = 0;
 static uint8_t pos = 0;
@@ -99,54 +74,13 @@ static uint8_t modChanged = 0;
 
 
 
-enum {
-    MOTOR_FW_L = 0,
-    MOTOR_FW_R = 1,
-    MOTOR_BW_L = 2,
-    MOTOR_BW_R = 3
-};
-
-#define MOTOR_SPEED_0  0
-#define MOTOR_SPEED_1  MAX_VAL-4000
-#define MOTOR_SPEED_2  MAX_VAL-3000
-#define MOTOR_SPEED_3  MAX_VAL-2000
-#define MOTOR_SPEED_4  MAX_VAL-1000
-#define MOTOR_SPEED_MAX  MAX_VAL
-#define MOTOR_SPEED_TORQUE  2550
-
-enum {
-    MOTOR_DIR_BACKWARD = -1,
-    MOTOR_DIR_STOP = 0,
-    MOTOR_DIR_FORWARD = 1
-};
 
 
-#define JOY_UP 1
-#define JOY_DOWN 2
-#define JOY_RIGHT 4
-#define JOY_LEFT 8
 
-enum {
-    /*
-      -x(1)
-         |
-  -y(8)--|---+y(4)
-         |
-       +x(2)
-    */
-    CAR_DIR_STOP = 0,
-    CAR_DIR_LEFT = JOY_LEFT,
-    CAR_DIR_RIGHT = JOY_RIGHT,
-    CAR_DIR_FORWARD = JOY_UP,
-    CAR_DIR_BACKWARD = JOY_DOWN,
-    CAR_DIR_LEFT_FORWARD = JOY_UP|JOY_LEFT,
-    CAR_DIR_RIGHT_FORWARD = JOY_UP|JOY_RIGHT,
-    CAR_DIR_RIGHT_BACKWARD = JOY_DOWN|JOY_RIGHT,
-    CAR_DIR_LEFT_BACKWARD = JOY_DOWN|JOY_LEFT
-};
 
-static  int  motors_direction[4]   = {0,0,0,0};
-static  uint16_t motors_speed[4]  = {0,0,0,0};
+
+
+
 static  uint16_t car_speed  = 0;
 static  uint16_t car_motor_n  = 0;
 static  int car_motor_dir = 0;
@@ -365,226 +299,6 @@ static uni_error_t my_platform_on_device_ready(uni_hid_device_t* d) {
     // You can reject the connection by returning an error.
     return UNI_ERROR_SUCCESS;
 }
-// PWM 0 Forward PWM, fast decay
-// 1 PWM Forward PWM, slow decay
-// 0 PWM Reverse PWM, fast decay
-// PWM 1 Reverse PWM, slow decay
-// 0 0 Z Z Coast/fast decay
-// 0 1 L H Reverse
-// 1 0 H L Forward
-// 1 1 L L Brake/slow decay
-//Sleep mode nSLEEP pin low
-// wheel 0 forward left;  1 forward right;
-//       2 backward left;  3 backward right;
-
-
-
-// https://datasheets.raspberrypi.org/rp2040/rp2040-datasheet.pdf, page 549
-      // https://datasheets.raspberrypi.org/rp2040/rp2040-datasheet.pdf, page 549
-      // https://raspberrypi.github.io/pico-sdk-doxygen/group__hardware__pwm.html
-    // if (freq > 2000.0)
-    // {
-    //   _PWM_config.div = 1;
-    // }
-    // else if (freq >= 200.0) 
-    // {
-    //   _PWM_config.div = 10;
-    // }
-    // else if (freq >= 20.0) 
-    // {
-    //   _PWM_config.div = 100;
-    // }
-    // else if (freq >= 10.0) 
-    // {
-    //   _PWM_config.div = 200;
-    // }
-    // else if (freq >= ( (float) MIN_PWM_FREQUENCY * freq_CPU / 125000000))
-    // {
-    //   _PWM_config.div = 255;
-    // }
-    // _PWM_config.top = ( freq_CPU / freq / _PWM_config.div ) - 1;
-        // _actualFrequency = ( freq_CPU  ) / ( (_PWM_config.top + 1) * _PWM_config.div );
-    //    if (_phaseCorrect)      _PWM_config.top /= 2;
-
-void motor_drive(uint wheel,uint16_t level, int direction )
-{  uint gpio1,gpio2,pin_sleep;
-   int motorIndex=-1;
-  if (wheel==FOR_LEFT) {
-    gpio1 = LEFT_MOTOR1_PIN_1;
-    gpio2 = LEFT_MOTOR1_PIN_2;
-    pin_sleep = MOTOR1_STBY;
-    motorIndex=MOTOR_FW_L;
-  } else if (wheel==FOR_RIGHT) {
-    gpio1 = RIGHT_MOTOR1_PIN_1;
-    gpio2 = RIGHT_MOTOR1_PIN_2;
-    pin_sleep = MOTOR1_STBY;
-    motorIndex=MOTOR_FW_R;
-  } else if (wheel==BACK_LEFT) {
-    gpio1 = LEFT_MOTOR2_PIN_1;
-    gpio2 = LEFT_MOTOR2_PIN_2;
-    pin_sleep = MOTOR2_STBY;
-    motorIndex=MOTOR_BW_L;
-  } else if (wheel==BACK_RIGHT) {
-    gpio1 = RIGHT_MOTOR2_PIN_1;
-    gpio2 = RIGHT_MOTOR2_PIN_2;
-    pin_sleep = MOTOR2_STBY;
-    motorIndex=MOTOR_BW_R;
-  } else {
-    return;
-  }
-
-    if (direction==MOTOR_DIR_BACKWARD) {
-        uint gpio_back=gpio1;
-        gpio1 =gpio2;
-        gpio2 =gpio_back;
-    }
-
-  uint slice_num = pwm_gpio_to_slice_num(gpio1);
-
-  
-
-  
-  if ((direction==MOTOR_DIR_FORWARD) ||(direction==MOTOR_DIR_BACKWARD)) {
-    if (motors_speed[motorIndex] == MIN(level,MAX_VAL)
-        && (motors_direction[motorIndex] ==direction)
-    ) {
-       logi("motor_drive: w/o changes #=%d s=%d dir=%d\n", motorIndex, motors_speed[motorIndex], motors_direction[motorIndex] );
-       return;
-    } 
-    motors_speed[motorIndex] = MIN(level,MAX_VAL);
-    motors_direction[motorIndex] =direction;
-
-
-
-    pwm_set_enabled(slice_num, false);
-    gpio_set_function(gpio1, GPIO_FUNC_PWM); //0A
-    // gpio_set_function(gpio2, GPIO_FUNC_PWM); //0B
-    gpio_init(gpio2);
-    gpio_set_dir(gpio2, GPIO_OUT);
-    gpio_put(gpio2, 0);
-
-
-  
-    if (direction==MOTOR_DIR_BACKWARD) {
-        pwm_set_both_levels(slice_num, 0, MIN(level,MAX_VAL));
-        }
-    else {
-        pwm_set_both_levels(slice_num, MIN(level,MAX_VAL), 0);
-        }
-
-  
-
-    // pwm_set_gpio_level(_pin, PWM_level ); 
-    pwm_set_enabled(slice_num, true);
-    //  pwm_set_mask_enabled(255);
-    gpio_put(pin_sleep, 1); //to run
-  }  else {
-    gpio_put(pin_sleep, 0); //to sleep
-    motors_speed[motorIndex] = 0;
-    motors_direction[motorIndex] =0;
-    gpio_init(gpio1);
-    gpio_set_dir(gpio1, GPIO_OUT);
-    gpio_put(gpio1, 0);
-
-    gpio_init(gpio2);
-    gpio_set_dir(gpio2, GPIO_OUT);
-    gpio_put(gpio2, 0);
-
-    pwm_set_enabled(slice_num, false);
-  }
-  logi("motor_drive: to gpio1=%d gpio2=%d #=%d s=%d dir=%d \n",gpio1,gpio2, motorIndex, motors_speed[motorIndex], motors_direction[motorIndex] );
-
-}
-
-void car_drive(int direction,uint32_t speed) {
-  //    motor_drive(uint wheel,uint32_t level, int direction )
-  switch (direction) {
-    case CAR_DIR_STOP:
-        motor_drive(MOTOR_FW_L,MOTOR_SPEED_0, MOTOR_DIR_STOP );
-        motor_drive(MOTOR_FW_R,MOTOR_SPEED_0, MOTOR_DIR_STOP );
-        motor_drive(MOTOR_BW_L,MOTOR_SPEED_0, MOTOR_DIR_STOP );
-        motor_drive(MOTOR_BW_R,MOTOR_SPEED_0, MOTOR_DIR_STOP );
-        break;
-    case CAR_DIR_LEFT:
-        motor_drive(MOTOR_FW_R,speed, MOTOR_DIR_FORWARD );
-        motor_drive(MOTOR_BW_R,speed, MOTOR_DIR_FORWARD );
-        motor_drive(MOTOR_FW_L,MOTOR_SPEED_0, MOTOR_DIR_STOP );
-        motor_drive(MOTOR_BW_L,MOTOR_SPEED_0, MOTOR_DIR_STOP );
-        break;
-    case CAR_DIR_RIGHT:
-        motor_drive(MOTOR_FW_R,MOTOR_SPEED_0, MOTOR_DIR_FORWARD);
-        motor_drive(MOTOR_BW_R,MOTOR_SPEED_0, MOTOR_DIR_FORWARD );
-        motor_drive(MOTOR_FW_L,speed, MOTOR_DIR_FORWARD );
-        motor_drive(MOTOR_BW_L,speed, MOTOR_DIR_FORWARD );
-        break;        
-    case CAR_DIR_FORWARD:
-        motor_drive(MOTOR_FW_L,speed, MOTOR_DIR_FORWARD );
-        motor_drive(MOTOR_BW_L,speed, MOTOR_DIR_FORWARD );
-        motor_drive(MOTOR_FW_R,speed, MOTOR_DIR_FORWARD );
-        motor_drive(MOTOR_BW_R,speed, MOTOR_DIR_FORWARD );
-        break;
-    case CAR_DIR_BACKWARD:
-        motor_drive(MOTOR_FW_L,speed, MOTOR_DIR_BACKWARD );
-        motor_drive(MOTOR_BW_L,speed, MOTOR_DIR_BACKWARD );
-        motor_drive(MOTOR_FW_R,speed, MOTOR_DIR_BACKWARD );
-        motor_drive(MOTOR_BW_R,speed, MOTOR_DIR_BACKWARD );
-        break;
-    case CAR_DIR_LEFT_FORWARD :
-        motor_drive(MOTOR_FW_L,speed/2, MOTOR_DIR_FORWARD );
-        motor_drive(MOTOR_BW_L,speed/2, MOTOR_DIR_FORWARD );
-        motor_drive(MOTOR_FW_R,speed  , MOTOR_DIR_FORWARD );
-        motor_drive(MOTOR_BW_R,speed  , MOTOR_DIR_FORWARD );
-        break;
-    case CAR_DIR_RIGHT_FORWARD :
-        motor_drive(MOTOR_FW_L,speed  , MOTOR_DIR_FORWARD );
-        motor_drive(MOTOR_BW_L,speed  , MOTOR_DIR_FORWARD );
-        motor_drive(MOTOR_FW_R,speed/2, MOTOR_DIR_FORWARD );
-        motor_drive(MOTOR_BW_R,speed/2, MOTOR_DIR_FORWARD );
-        break;
-    case CAR_DIR_RIGHT_BACKWARD :
-        motor_drive(MOTOR_FW_L,speed  , MOTOR_DIR_BACKWARD );
-        motor_drive(MOTOR_BW_L,speed  , MOTOR_DIR_BACKWARD );
-        motor_drive(MOTOR_FW_R,speed/2, MOTOR_DIR_BACKWARD );
-        motor_drive(MOTOR_BW_R,speed/2, MOTOR_DIR_BACKWARD );
-        break;
-    case CAR_DIR_LEFT_BACKWARD :
-        motor_drive(MOTOR_FW_L,speed/2, MOTOR_DIR_BACKWARD );
-        motor_drive(MOTOR_BW_L,speed/2, MOTOR_DIR_BACKWARD );
-        motor_drive(MOTOR_FW_R,speed  , MOTOR_DIR_BACKWARD );
-        motor_drive(MOTOR_BW_R,speed  , MOTOR_DIR_BACKWARD );
-        break;    
-    default:
-            break;
-    }
-}   
-
-long mapJ2PWM(long x)
-{
-  long  res=(MAX_ZONE_XY - MIN_ZONE_XY) * (MOTOR_SPEED_MAX - MOTOR_SPEED_TORQUE) / (MAX_ZONE_XY - MIN_ZONE_XY) + MOTOR_SPEED_TORQUE;
-  return res>MOTOR_SPEED_MAX?MOTOR_SPEED_MAX:(res<MOTOR_SPEED_TORQUE+10?0:res);
-}
-
-void car_drive2(long speedL,long speedR) {
-  
-  long motor_speedL=mapJ2PWM(fabs(speedL));
-  long motor_speedR=mapJ2PWM(fabs(speedR));
-  // stop
-  if (motor_speedL<10) {
-        motor_drive(MOTOR_FW_L,MOTOR_SPEED_0, MOTOR_DIR_STOP );
-        motor_drive(MOTOR_BW_L,MOTOR_SPEED_0, MOTOR_DIR_STOP );
-  } else {
-        motor_drive(MOTOR_FW_L,motor_speedL, speedL>0?MOTOR_DIR_FORWARD:MOTOR_DIR_BACKWARD );
-        motor_drive(MOTOR_BW_L,motor_speedL, speedL>0?MOTOR_DIR_FORWARD:MOTOR_DIR_BACKWARD );
-  }
-  if (motor_speedR<10) {
-        motor_drive(MOTOR_FW_R,MOTOR_SPEED_0, MOTOR_DIR_STOP );
-        motor_drive(MOTOR_BW_R,MOTOR_SPEED_0, MOTOR_DIR_STOP );
-  } else {
-        motor_drive(MOTOR_FW_R,motor_speedR, speedR>0?MOTOR_DIR_FORWARD:MOTOR_DIR_BACKWARD );
-        motor_drive(MOTOR_BW_R,motor_speedR, speedR>0?MOTOR_DIR_FORWARD:MOTOR_DIR_BACKWARD);
-  
-  }   
-}
 
 
 static void my_platform_on_controller_data(uni_hid_device_t* d, uni_controller_t* ctl) {
@@ -665,66 +379,65 @@ static void my_platform_on_controller_data(uni_hid_device_t* d, uni_controller_t
             if (flag_change) {
                 logi("fc=%d \n", flag_change);
                 
-                
                 if (flag_change&CHANGE_DPAD) {
                     if (gp->dpad & DPAD_UP) {
                         if (car_motor_n==MOTOR_FW_L) {
                            car_motor_dir++;
-                           if (car_motor_dir>MOTOR_DIR_FORWARD) {
-                            car_motor_dir=MOTOR_DIR_BACKWARD;
+                           if (car_motor_dir>MOTOR_MODE_FORWARD) {
+                            car_motor_dir=MOTOR_MODE_BACKWARD;
                            }
                         } else {
-                           motor_drive(car_motor_n,0, MOTOR_DIR_STOP ); 
-                           car_motor_dir=MOTOR_DIR_FORWARD ;
+                           motor_drive0(car_motor_n,0, MOTOR_MODE_STOP ); 
+                           car_motor_dir=MOTOR_MODE_FORWARD ;
                            car_motor_n=MOTOR_FW_L;
                         }
                         logi("dpad up n=%d s=%d d=%d\n", car_motor_n,car_speed, car_motor_dir);
-                        motor_drive(car_motor_n,car_speed, car_motor_dir );
+                        motor_drive0(car_motor_n,car_speed, car_motor_dir );
                     }
 
                     if (gp->dpad & DPAD_DOWN) {
                         if (car_motor_n==MOTOR_FW_R) {
                            car_motor_dir++;
-                           if (car_motor_dir>MOTOR_DIR_FORWARD) {
-                            car_motor_dir=MOTOR_DIR_BACKWARD;
+                           if (car_motor_dir>MOTOR_MODE_FORWARD) {
+                            car_motor_dir=MOTOR_MODE_BACKWARD;
                            }
                         } else {
-                           motor_drive(car_motor_n,0, MOTOR_DIR_STOP ); 
-                           car_motor_dir=MOTOR_DIR_FORWARD ;
+                           motor_drive0(car_motor_n,0, MOTOR_MODE_STOP ); 
+                           car_motor_dir=MOTOR_MODE_FORWARD ;
                            car_motor_n=MOTOR_FW_R;
                         }
                         logi("dpad down n=%d s=%d d=%d\n", car_motor_n,car_speed, car_motor_dir );
-                        motor_drive(car_motor_n,car_speed, car_motor_dir );                        
+                        motor_drive0(car_motor_n,car_speed, car_motor_dir );                        
                     }    
 
                     if (gp->dpad & DPAD_LEFT) {
                         if (car_motor_n==MOTOR_BW_L) {
                            car_motor_dir++;
-                           if (car_motor_dir>MOTOR_DIR_FORWARD) {
-                            car_motor_dir=MOTOR_DIR_BACKWARD;
+                           if (car_motor_dir>MOTOR_MODE_FORWARD) {
+                            car_motor_dir=MOTOR_MODE_BACKWARD;
                            }
                         } else {
-                           motor_drive(car_motor_n,0, MOTOR_DIR_STOP ); 
-                           car_motor_dir=MOTOR_DIR_FORWARD ;
+                           motor_drive0(car_motor_n,0, MOTOR_MODE_STOP ); 
+                           car_motor_dir=MOTOR_MODE_FORWARD ;
                            car_motor_n=MOTOR_BW_L;
                         }
                         logi("dpad left n=%d s=%d d=%d\n", car_motor_n,car_speed, car_motor_dir);
-                        motor_drive(car_motor_n,car_speed, car_motor_dir );  
+                        motor_drive0(car_motor_n,car_speed, car_motor_dir );  
                     }
 
                     if (gp->dpad & DPAD_RIGHT) {
                         if (car_motor_n==MOTOR_BW_R) {
                            car_motor_dir++;
-                           if (car_motor_dir>MOTOR_DIR_FORWARD) {
-                            car_motor_dir=MOTOR_DIR_BACKWARD;
+                           if (car_motor_dir>MOTOR_MODE_FORWARD) {
+                            car_motor_dir=MOTOR_MODE_BACKWARD;
                            }
                         } else {
-                           motor_drive(car_motor_n,0, MOTOR_DIR_STOP ); 
-                           car_motor_dir=MOTOR_DIR_FORWARD ;
+                           motor_drive0(car_motor_n,0, MOTOR_MODE_STOP ); 
+                           car_motor_dir=MOTOR_MODE_FORWARD ;
                            car_motor_n=MOTOR_BW_R;
                         }
                         logi("dpad right n=%d s=%d d=%d\n", car_motor_n,car_speed, car_motor_dir);
-                        motor_drive(car_motor_n,car_speed, car_motor_dir );                     }
+                        motor_drive0(car_motor_n,car_speed, car_motor_dir );                     }
                     prev_dpad=gp->dpad;
                 } 
                 
@@ -735,7 +448,7 @@ static void my_platform_on_controller_data(uni_hid_device_t* d, uni_controller_t
                            car_speed=0; 
                         }
                         logi("butt Y  n=%d s=%d d=%d\n", car_motor_n,car_speed, car_motor_dir);
-                        motor_drive(car_motor_n,car_speed, car_motor_dir );  
+                        motor_drive0(car_motor_n,car_speed, car_motor_dir );  
                     }
                     prev_buttons=gp->buttons;
                 }
@@ -752,7 +465,6 @@ static void my_platform_on_controller_data(uni_hid_device_t* d, uni_controller_t
                 long dL=0;
                 long dR=0;
                 if (flag_change&CHANGE_RX) {
-                    // car_drive(uint direction,uint32_t speed);
                     if (fabs(gp->axis_rx)>DEAD_ZONE_XY && gp->axis_rx>0) {
                         direction_Rxy|=JOY_RIGHT;
                     } else if (fabs(gp->axis_rx)>DEAD_ZONE_XY && gp->axis_rx<0) {
@@ -825,21 +537,21 @@ static void my_platform_on_controller_data(uni_hid_device_t* d, uni_controller_t
 
                 if (flag_change&(CHANGE_RX)) {
                     long rx=(gp->axis_rx < -DEAD_ZONE_XY || gp->axis_rx > DEAD_ZONE_XY)? -gp->axis_rx:0;
-                       dL+=rx;
-                       dR-=rx;
+                       dR+=rx;
+                       dL-=rx;
                 }
 
                 if (flag_change&(CHANGE_X)) {
                     long x=(gp->axis_x < -DEAD_ZONE_XY || gp->axis_x > DEAD_ZONE_XY)? -gp->axis_x:0;
-                       dL+=x;
-                       dR-=x/2;
+                       dR+=x;
+                       dL-=x/2;
                     } 
                     //  logi("dL =%d dR =%d \n ", dL, dR);
 
 
-                // car_drive(direction_Rxy,speed_Rxy);
                 if (flag_change&(CHANGE_RY|CHANGE_Y|CHANGE_RX|CHANGE_X)) {
-                car_drive2(speedX+dL/3,speedX+dR/3);
+                //    car_drive(speedX+dL/3,speedX+dR/3);
+                   car_drive_PID(speedX+dL/3,speedX+dR/3);
                 }
                 
                 if (flag_change&CHANGE_BRAKE) prev_brake=gp->brake;
