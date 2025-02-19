@@ -1,4 +1,4 @@
- This project has code to control the car platform by bluetouth joystick asn Raspberberry Pico W. 
+ This project has code to control the car platform by bluetouth joystick and Raspberberry Pico W. 
  The car is a four wheel drive platform powered by 4 PWM controlled motors. 
  The code grounds by bluepad32 project.
 
