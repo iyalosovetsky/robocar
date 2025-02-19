@@ -20,4 +20,4 @@ https://arduino.ua/prod3697-draiver-dvigatelei-dvyhkanalnii-drv8833
 
 https://arduino.ua/prod6108-peremikach-kryglii-kcd1-201-2p-on-off-2-h-kontaktnii-6a-220v-bilii
 
-[see my RC by CRSF protocol] (https://github.com/iyalosovetsky/pico_expressELRS_car/blob/main/README.md)
+see my RC by CRSF protocol https://github.com/iyalosovetsky/pico_expressELRS_car/blob/main/README.md
