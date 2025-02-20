@@ -2,7 +2,7 @@
  The car is a four wheel drive platform powered by 4 PWM controlled motors. 
  The code grounds by bluepad32 project.
 
-[![Watch the video](https://img.youtube.com/vi/cAvKrcaPvDQ/default.jpg)](https://youtu.be/cAvKrcaPvDQ)
+VIDEO [![Watch the video](https://img.youtube.com/vi/cAvKrcaPvDQ/default.jpg)](https://youtu.be/cAvKrcaPvDQ)
 
 The parts 
 
